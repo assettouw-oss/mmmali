@@ -1,0 +1,8 @@
+MMMali - demarrage
+
+1. Installe Node.js (version LTS) depuis nodejs.org, puis redemarre ton PC.
+2. Dezippe ce dossier, puis dans VS Code : Fichier > Ouvrir le dossier > choisis "mmmali".
+3. Ouvre le terminal (Terminal > Nouveau terminal) et tape :
+      npm install
+      npm run dev
+4. Ouvre http://localhost:3000 dans ton navigateur.
