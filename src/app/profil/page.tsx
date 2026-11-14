@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
@@ -8,195 +9,287 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+type ProfilForm = {
+  nom: string;
+  telephone: string;
+  ville: string;
+  email: string;
+};
+
 export default function ProfilPage() {
-  const [user, setUser] = useState<any>(null);
-  const [form, setForm] = useState({
-    full_name: "",
-    phone: "",
-    whatsapp: "",
+  const [userId, setUserId] = useState<string | null>(null);
+  const [form, setForm] = useState<ProfilForm>({
+    nom: "",
+    telephone: "",
     ville: "Bamako",
-    quartier: "",
-    bio: "",
     email: "",
   });
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase.auth.getUser();
-      const u = data.user;
-      if (!u) return;
-      setUser(u);
+    let actif = true;
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", u.id)
-        .single();
+    async function loadProfile() {
+      try {
+        const { data: authData, error: authError } =
+          await supabase.auth.getUser();
 
-      if (profile) {
+        if (authError) throw authError;
+
+        const user = authData.user;
+
+        if (!user) {
+          if (actif) {
+            setMessage("Connecte-toi pour modifier ton profil.");
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (!actif) return;
+
+        setUserId(user.id);
+
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("nom, telephone, ville")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (!actif) return;
+
         setForm({
-          full_name: profile.full_name || "",
-          phone: profile.phone || "",
-          whatsapp: profile.whatsapp || "",
-          ville: profile.ville || "Bamako",
-          quartier: profile.quartier || "",
-          bio: profile.bio || "",
-          email: u.email || "",
+          nom: profile?.nom ?? "",
+          telephone: profile?.telephone ?? "",
+          ville: profile?.ville ?? "Bamako",
+          email: user.email ?? "",
         });
-      } else {
-        setForm((f) => ({ ...f, email: u.email || "" }));
+      } catch (error) {
+        console.error("Erreur chargement profil :", error);
+
+        if (actif) {
+          setMessage("Impossible de charger ton profil.");
+        }
+      } finally {
+        if (actif) setLoading(false);
       }
     }
-    load();
+
+    void loadProfile();
+
+    return () => {
+      actif = false;
+    };
   }, []);
 
+  function updateField(
+    field: keyof Omit<ProfilForm, "email">,
+    value: string
+  ) {
+    setForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  }
+
   async function save() {
-    if (!user) return;
-    const { error } = await supabase.from("profiles").upsert(
-      {
-        id: user.id,
-        full_name: form.full_name,
-        phone: form.phone,
-        whatsapp: form.whatsapp,
-        ville: form.ville,
-        quartier: form.quartier,
-        bio: form.bio,
-      },
-      { onConflict: "id" }
-    );
-    if (error) {
-      alert("Erreur: " + error.message);
-    } else {
-      alert("Profil sauvegarde !");
+    if (!userId || saving) return;
+
+    if (!form.nom.trim()) {
+      setMessage("Le nom complet est obligatoire.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          nom: form.nom.trim(),
+          telephone: form.telephone.trim(),
+          ville: form.ville,
+        })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      setMessage("Profil enregistré avec succès !");
+    } catch (error) {
+      console.error("Erreur sauvegarde profil :", error);
+
+      setMessage(
+        error instanceof Error
+          ? `Erreur : ${error.message}`
+          : "Une erreur est survenue pendant la sauvegarde."
+      );
+    } finally {
+      setSaving(false);
     }
   }
 
+  const initiale = form.nom.trim()
+    ? form.nom.trim().charAt(0).toUpperCase()
+    : "U";
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#f8f8f8] flex items-center justify-center">
+        <p className="text-sm text-gray-500">Chargement du profil...</p>
+      </main>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f8f8f8]">
-      <div className="bg-white p-4 border-b flex items-center gap-3">
+    <main className="min-h-screen bg-[#f8f8f8]">
+      <header className="bg-white p-4 border-b flex items-center gap-3">
         <Link
           href="/compte"
-          className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"
+          aria-label="Retour au compte"
+          className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center"
         >
           ←
         </Link>
-        <p className="font-black">Modifier mon profil</p>
-      </div>
 
-      <div className="p-4">
-        <div className="bg-white rounded-2xl border p-5">
+        <h1 className="font-black">Modifier mon profil</h1>
+      </header>
+
+      <div className="max-w-xl mx-auto p-4">
+        <section className="bg-white rounded-2xl border p-5">
           <div className="flex flex-col items-center">
             <div className="w-20 h-20 bg-black text-white rounded-full flex items-center justify-center text-2xl font-black">
-              {form.full_name ? form.full_name[0].toUpperCase() : "U"}
+              {initiale}
             </div>
+
             <p className="font-black mt-2">
-              {form.full_name || "Nom non defini"}
+              {form.nom || "Nom non défini"}
             </p>
+
             <p className="text-xs text-gray-500">{form.email}</p>
           </div>
 
-          <div className="mt-6 space-y-3">
-            <div>
-              <p className="text-[11px] font-bold">Nom complet *</p>
-              <input
-                value={form.full_name}
-                onChange={(e) =>
-                  setForm({ ...form, full_name: e.target.value })
-                }
-                className="w-full p-3 border rounded-xl mt-1 text-sm"
-                placeholder="Ex: Adama Sylla"
-              />
+          {!userId ? (
+            <div className="mt-6 text-center">
+              <p className="text-sm text-red-600">{message}</p>
+              <Link
+                href="/compte"
+                className="inline-block mt-4 bg-black text-white px-5 py-3 rounded-full text-sm font-bold"
+              >
+                Aller à mon compte
+              </Link>
             </div>
-
-            <div>
-              <p className="text-[11px] font-bold">Email (non modifiable)</p>
-              <input
-                value={form.email}
-                disabled
-                className="w-full p-3 border rounded-xl mt-1 bg-gray-100 text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+          ) : (
+            <div className="mt-6 space-y-4">
               <div>
-                <p className="text-[11px] font-bold">Telephone</p>
+                <label
+                  htmlFor="nom"
+                  className="text-xs font-bold"
+                >
+                  Nom complet *
+                </label>
+
                 <input
-                  value={form.phone}
+                  id="nom"
+                  value={form.nom}
+                  onChange={(e) => updateField("nom", e.target.value)}
+                  maxLength={100}
+                  required
+                  className="w-full p-3 border rounded-xl mt-1 text-sm"
+                  placeholder="Ex : Adama Sylla"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="email"
+                  className="text-xs font-bold"
+                >
+                  Adresse email
+                </label>
+
+                <input
+                  id="email"
+                  value={form.email}
+                  disabled
+                  className="w-full p-3 border rounded-xl mt-1 bg-gray-100 text-sm"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="telephone"
+                  className="text-xs font-bold"
+                >
+                  Numéro de téléphone
+                </label>
+
+                <input
+                  id="telephone"
+                  type="tel"
+                  value={form.telephone}
                   onChange={(e) =>
-                    setForm({ ...form, phone: e.target.value })
+                    updateField("telephone", e.target.value)
                   }
+                  maxLength={25}
                   className="w-full p-3 border rounded-xl mt-1 text-sm"
                   placeholder="70 00 00 00"
                 />
               </div>
-              <div>
-                <p className="text-[11px] font-bold">WhatsApp</p>
-                <input
-                  value={form.whatsapp}
-                  onChange={(e) =>
-                    setForm({ ...form, whatsapp: e.target.value })
-                  }
-                  className="w-full p-3 border rounded-xl mt-1 text-sm"
-                  placeholder="70 00 00 00"
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="text-[11px] font-bold">Ville</p>
+                <label
+                  htmlFor="ville"
+                  className="text-xs font-bold"
+                >
+                  Ville
+                </label>
+
                 <select
+                  id="ville"
                   value={form.ville}
-                  onChange={(e) =>
-                    setForm({ ...form, ville: e.target.value })
-                  }
+                  onChange={(e) => updateField("ville", e.target.value)}
                   className="w-full p-3 border rounded-xl mt-1 text-sm"
                 >
-                  <option>Bamako</option>
-                  <option>Kayes</option>
-                  <option>Sikasso</option>
-                  <option>Segou</option>
-                  <option>Mopti</option>
-                  <option>Koutiala</option>
+                  <option value="Bamako">Bamako</option>
+                  <option value="Kayes">Kayes</option>
+                  <option value="Sikasso">Sikasso</option>
+                  <option value="Ségou">Ségou</option>
+                  <option value="Mopti">Mopti</option>
+                  <option value="Koutiala">Koutiala</option>
                 </select>
               </div>
-              <div>
-                <p className="text-[11px] font-bold">Quartier</p>
-                <input
-                  value={form.quartier}
-                  onChange={(e) =>
-                    setForm({ ...form, quartier: e.target.value })
-                  }
-                  className="w-full p-3 border rounded-xl mt-1 text-sm"
-                  placeholder="Ex: Hamdallaye"
-                />
-              </div>
+
+              {message && (
+                <p
+                  role="status"
+                  className="text-sm text-center text-gray-700"
+                >
+                  {message}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="w-full bg-black text-white py-4 rounded-full font-black mt-2 disabled:opacity-50"
+              >
+                {saving ? "Enregistrement..." : "Enregistrer mon profil"}
+              </button>
+
+              <p className="text-[10px] text-gray-400 text-center">
+                Tes informations sont enregistrées dans ton compte.
+              </p>
             </div>
-
-            <div>
-              <p className="text-[11px] font-bold">Bio boutique</p>
-              <textarea
-                value={form.bio}
-                onChange={(e) => setForm({ ...form, bio: e.target.value })}
-                className="w-full p-3 border rounded-xl mt-1 text-sm h-24"
-                placeholder="Je vends electronique, livraison rapide Bamako..."
-              />
-            </div>
-
-            <button
-              onClick={save}
-              className="w-full bg-black text-white py-4 rounded-full font-black mt-2"
-            >
-              Enregistrer profil
-            </button>
-
-            <p className="text-[10px] text-gray-400 text-center mt-2">
-              Tes infos email et localisation s affichent obligatoirement sur
-              ton compte pour les clients.
-            </p>
-          </div>
-        </div>
+          )}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

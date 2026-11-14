@@ -1,130 +1,198 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
 import {
   getPanier,
   viderPanier,
   type PanierItem,
 } from "@/lib/panier";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+type Profil = {
+  nom: string | null;
+  telephone: string | null;
+  ville: string | null;
+};
+
+type FormulaireCommande = {
+  nom: string;
+  phone: string;
+  ville: string;
+  adresse: string;
+};
+
+type ModePaiement =
+  | "livraison"
+  | "orange_money"
+  | "moov_money";
+
+type LigneCommande = {
+  product_id: string;
+  quantite: number;
+};
+
+function messageErreur(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return "Impossible d'enregistrer la commande.";
+}
 
 export default function CommandePage() {
   const [panier, setPanier] = useState<PanierItem[]>([]);
-  const [user, setUser] = useState<any>(null);
-  const [form, setForm] = useState({
+  const [user, setUser] = useState<User | null>(null);
+
+  const [form, setForm] = useState<FormulaireCommande>({
     nom: "",
     phone: "",
     ville: "Bamako",
     adresse: "",
   });
-  const [paiement, setPaiement] = useState(
-    "Paiement à la livraison"
-  );
+
+  const [paiement, setPaiement] =
+    useState<ModePaiement>("livraison");
+
   const [loading, setLoading] = useState(false);
-  const [messageErreur, setMessageErreur] = useState("");
+  const [chargement, setChargement] = useState(true);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
+    let actif = true;
+
     async function charger() {
-      setPanier(getPanier());
+      try {
+        const articles = getPanier();
 
-      const { data, error } = await supabase.auth.getUser();
+        if (actif) {
+          setPanier(articles);
+        }
 
-      if (error || !data.user) {
-        setUser(null);
-        return;
-      }
+        const { data, error } = await supabase.auth.getUser();
 
-      setUser(data.user);
+        if (error || !data.user) {
+          if (actif) {
+            setUser(null);
+          }
+          return;
+        }
 
-      const { data: profil } = await supabase
-        .from("profiles")
-        .select("full_name, phone, whatsapp, ville, quartier")
-        .eq("id", data.user.id)
-        .maybeSingle();
+        if (actif) {
+          setUser(data.user);
+        }
 
-      if (profil) {
-        setForm({
-          nom: profil.full_name || "",
-          phone: profil.phone || profil.whatsapp || "",
-          ville: profil.ville || "Bamako",
-          adresse: profil.quartier || "",
-        });
+        const { data: profil, error: erreurProfil } =
+          await supabase
+            .from("profiles")
+            .select("nom, telephone, ville")
+            .eq("id", data.user.id)
+            .maybeSingle<Profil>();
+
+        if (erreurProfil) {
+          console.error("Erreur chargement profil :", erreurProfil);
+        }
+
+        if (actif && profil) {
+          setForm({
+            nom: profil.nom ?? "",
+            phone: profil.telephone ?? "",
+            ville: profil.ville ?? "Bamako",
+            adresse: "",
+          });
+        }
+      } catch (error: unknown) {
+        console.error("Erreur de chargement :", error);
+
+        if (actif) {
+          setMessage("Impossible de charger les informations.");
+        }
+      } finally {
+        if (actif) {
+          setChargement(false);
+        }
       }
     }
 
-    charger();
+    void charger();
+
+    return () => {
+      actif = false;
+    };
   }, []);
 
   const total = panier.reduce(
-    (s, p) => s + p.prix * p.quantite,
+    (somme, produit) =>
+      somme + produit.prix * produit.quantite,
     0
   );
 
   async function commander() {
-    setMessageErreur("");
+    setMessage("");
 
     if (!user) {
-      setMessageErreur(
+      setMessage(
         "Connecte-toi à ton compte avant de commander."
       );
       return;
     }
 
     if (panier.length === 0) {
-      setMessageErreur("Ton panier est vide.");
+      setMessage("Ton panier est vide.");
       return;
     }
 
     if (!form.nom.trim() || !form.phone.trim()) {
-      setMessageErreur(
+      setMessage(
         "Le nom et le téléphone sont obligatoires."
       );
       return;
     }
 
     if (!form.ville.trim() || !form.adresse.trim()) {
-      setMessageErreur(
-        "Renseigne ta ville et ton quartier."
-      );
+      setMessage("Renseigne ta ville et ton quartier.");
       return;
     }
+
+    const articles: LigneCommande[] = panier.map(
+      (produit) => ({
+        product_id: produit.id,
+        quantite: produit.quantite,
+      })
+    );
 
     setLoading(true);
 
     try {
-      const articles = panier.map((p) => ({
-        product_id: p.id,
-        quantite: p.quantite,
-      }));
+      const { data, error } = await supabase.rpc(
+        "passer_commande",
+        {
+          p_nom: form.nom.trim(),
+          p_telephone: form.phone.trim(),
+          p_adresse: `${form.ville.trim()} - ${form.adresse.trim()}`,
+          p_paiement: paiement,
+          p_lignes: articles,
+        }
+      );
 
-     const { data: orderId, error } = await supabase.rpc(
-  "creer_commande_mmmali",
-  {
-    p_nom: form.nom.trim(),
-    p_telephone: form.phone.trim(),
-    p_adresse: `${form.ville.trim()} - ${form.adresse.trim()}`,
-    p_paiement: paiement,
-    p_items: articles,
-  }
-);
+      if (error) {
+        throw error;
+      }
 
-console.log("ID COMMANDE :", orderId);
-console.log("ERREUR SUPABASE :", error);
+      const orderId = data as string | null;
 
-if (error) {
-  throw error;
-}
+      if (!orderId) {
+        throw new Error(
+          "La commande n'a pas été enregistrée."
+        );
+      }
 
-if (!orderId) {
-  throw new Error("La commande n'a pas été enregistrée.");
-}
-      // Vider le panier uniquement après confirmation de Supabase
       viderPanier();
       setPanier([]);
 
@@ -133,16 +201,22 @@ if (!orderId) {
       );
 
       window.location.href = "/";
-
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erreur commande :", error);
-
-      setMessageErreur(
-        error.message || "Impossible d'enregistrer la commande."
-      );
+      setMessage(messageErreur(error));
     } finally {
       setLoading(false);
     }
+  }
+
+  if (chargement) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-500">
+          Chargement de ta commande...
+        </p>
+      </div>
+    );
   }
 
   if (panier.length === 0) {
@@ -150,9 +224,11 @@ if (!orderId) {
       <div className="min-h-screen flex items-center justify-center p-6 text-center">
         <div>
           <p className="font-black text-xl">Panier vide</p>
+
           <p className="text-sm text-gray-500 mt-1">
             Ajoute des produits avant de commander.
           </p>
+
           <Link
             href="/"
             className="mt-4 inline-block bg-black text-white px-6 py-3 rounded-full"
@@ -167,7 +243,6 @@ if (!orderId) {
   return (
     <div className="min-h-screen bg-[#f7f7f7] p-4">
       <div className="max-w-[700px] mx-auto">
-
         <Link href="/panier" className="text-sm underline">
           ← Retour au panier
         </Link>
@@ -182,30 +257,35 @@ if (!orderId) {
           </p>
 
           <div className="mt-3 space-y-3">
-            {panier.map((p) => (
+            {panier.map((produit) => (
               <div
-                key={p.id}
+                key={produit.id}
                 className="flex gap-3 border-b pb-3 last:border-0"
               >
-                {p.image_url && (
+                {produit.image_url && (
                   <img
-                    src={p.image_url}
-                    alt={p.titre}
+                    src={produit.image_url}
+                    alt={produit.titre}
                     className="w-16 h-16 object-cover rounded-xl"
                   />
                 )}
 
                 <div className="flex-1">
                   <p className="font-bold text-sm">
-                    {p.titre}
+                    {produit.titre}
                   </p>
+
                   <p className="text-xs text-gray-500">
-                    {p.quantite} × {p.prix.toLocaleString()} FCFA
+                    {produit.quantite} ×{" "}
+                    {produit.prix.toLocaleString("fr-FR")} FCFA
                   </p>
                 </div>
 
                 <p className="font-black text-sm text-orange-600">
-                  {(p.prix * p.quantite).toLocaleString()} FCFA
+                  {(
+                    produit.prix * produit.quantite
+                  ).toLocaleString("fr-FR")}{" "}
+                  FCFA
                 </p>
               </div>
             ))}
@@ -213,8 +293,9 @@ if (!orderId) {
 
           <div className="flex justify-between font-black text-lg mt-3 pt-3 border-t">
             <span>Total</span>
+
             <span className="text-orange-600">
-              {total.toLocaleString()} FCFA
+              {total.toLocaleString("fr-FR")} FCFA
             </span>
           </div>
         </div>
@@ -276,20 +357,27 @@ if (!orderId) {
 
           <select
             value={paiement}
-            onChange={(e) => setPaiement(e.target.value)}
+            onChange={(e) =>
+              setPaiement(e.target.value as ModePaiement)
+            }
             className="w-full p-3 border rounded-xl mt-2 bg-white"
           >
-            <option value="Paiement à la livraison">
+            <option value="livraison">
               Paiement à la livraison
             </option>
-            <option value="Orange Money">Orange Money</option>
-            <option value="Moov Money">Moov Money</option>
-            <option value="Wave">Wave</option>
+
+            <option value="orange_money">
+              Orange Money
+            </option>
+
+            <option value="moov_money">
+              Moov Money
+            </option>
           </select>
 
-          {messageErreur && (
+          {message && (
             <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl mt-3">
-              {messageErreur}
+              {message}
             </p>
           )}
 

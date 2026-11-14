@@ -1,7 +1,12 @@
-node_modules
-.next
-.env*.local
+node_modules/
+.next/
+out/
+.vercel/
+
+.env*
+!.env.example
+
 next-env.d.ts
 
-.vercel
-.env*
+*.log
+.DS_Store

@@ -1,411 +1,459 @@
 ﻿"use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
-type Vue = "home" | "commandes" | "favoris" | "stories" | "portefeuille-profil" | "portefeuille" | "solde" | "profil" | "localisations" | "reference" | "assistance" | "tutoriel" | "faq" | "confidentialite" | "publications";
-const MODES = ["Restaurant", "Ã‰lectronique", "Mode", "CosmÃ©tique", "Maison", "Sport", "SantÃ©", "BeautÃ©", "Auto / Moto", "Immobilier", "Services", "Autre"];
-export default function Compte() {
-  const [vue, setVue] = useState<Vue>("home");
-  const [user, setUser] = useState<any>(null);
-  const [chargementCompte, setChargementCompte] = useState(true);
-  const [profil, setProfil] = useState({ nom: "", full_name: "", telephone: "", phone: "", whatsapp: "", ville: "Bamako", quartier: "", email: "", role: "vendeur", boutique_nom: "" });
-  const [produits, setProduits] = useState<any[]>([]);
-  const [solde, setSolde] = useState(500);
-  const [showPub, setShowPub] = useState(false);
-  const [pubForm, setPubForm] = useState({ titre: "", prix: "", categorie: "Ã‰lectronique", mode_produit: "Ã‰lectronique", ville: "Bamako", whatsapp: "", description: "", image_url: "", video_url: "", anonyme: true });
-  const [montant, setMontant] = useState("");
-  const [showEdit, setShowEdit] = useState(false);
-  const [editProduit, setEditProduit] = useState<any>(null);
-  const [editForm, setEditForm] = useState({ titre: "", prix: "", mode_produit: "Ã‰lectronique", ville: "Bamako", whatsapp: "", description: "", image_url: "", video_url: "" });
 
-  // âœ… NOUVEAU : Formulaire de connexion si pas connectÃ©
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPass, setLoginPass] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [showLoginPass, setShowLoginPass] = useState(false);
-
-  // âœ… CORRIGÃ‰ : On utilise VRAIMENT nomAffiche partout dans l'Ã©cran
-  // PrioritÃ© : boutique_nom -> nom -> metadata -> fallback
-  const nomAffiche = profil?.boutique_nom || profil?.nom || user?.user_metadata?.boutique_nom || user?.user_metadata?.full_name || "Compte MM Mali";
-  const whatsappAffiche = profil?.whatsapp || profil?.telephone || user?.user_metadata?.whatsapp || "Non dÃ©fini";
-  const lettre = nomAffiche.charAt(0).toUpperCase();
-
-  // âœ… UN SEUL useEffect, pas 2 - AVEC getSession, pas getUser
- useEffect(() => {
-  async function load() {
-    // âœ… Ã‰TAPE 0 : On prend la SESSION, c'est le plus fiable sur iPhone
-    // getUser() tout seul dit souvent "pas connectÃ©" mÃªme quand tu l'es
-    const { data: sess } = await supabase.auth.getSession();
-    const u = sess.session?.user;
-    if (!u) {
-      setUser(null);
-      setChargementCompte(false);
-      return;
-    }
-    setUser(u);
-
-    const meta: any = u.user_metadata || {};
-
-    // âœ… Ã‰TAPE 1 : On affiche TOUT DE SUITE depuis le compte, on n'attend pas profiles
-    // C'est Ã§a qui va afficher les infos du petit frÃ¨re en haut, mÃªme si profiles est vide
-    const nomDirect = meta.boutique_nom || meta.full_name || "";
-    const waDirect = meta.whatsapp || meta.phone || "";
-
-    setProfil({
-      nom: nomDirect,
-      full_name: nomDirect,
-      telephone: waDirect,
-      phone: waDirect,
-      whatsapp: waDirect,
-      ville: "Bamako",
-      quartier: "",
-      email: u.email || "",
-      role: "vendeur",
-      boutique_nom: meta.boutique_nom || nomDirect,
-    });
-    setPubForm((f) => ({ ...f, whatsapp: waDirect}));
-
-    // âœ… Ã‰TAPE 2 : On regarde si le profil existe dans la table
-    const { data: prof } = await supabase.from("profiles").select("*").eq("id", u.id).maybeSingle();
-
-    if (prof) {
-      // Si il existe, on l'affiche (c'est le plus complet)
-      setProfil({
-        nom: prof.nom || nomDirect,
-        full_name: prof.nom || nomDirect,
-        telephone: prof.whatsapp || prof.telephone || waDirect,
-        phone: prof.whatsapp || prof.telephone || waDirect,
-        whatsapp: prof.whatsapp || prof.telephone || waDirect,
-        ville: prof.ville || "Bamako",
-        quartier: prof.quartier || "",
-        email: u.email || prof.email || "",
-        role: prof.role || "vendeur",
-        boutique_nom: prof.boutique_nom || meta.boutique_nom || nomDirect,
-      });
-      setPubForm((f) => ({ ...f, whatsapp: prof.whatsapp || prof.telephone || waDirect }));
-    } else {
-      // âœ… Ã‰TAPE 3 : Si il n'existe PAS, on le crÃ©e maintenant
-      // Ici Ã§a ne plante plus, parce que l'utilisateur est dÃ©jÃ  bien connectÃ©
-      // Ce n'est plus comme dans app/page.tsx oÃ¹ il venait juste d'Ãªtre crÃ©Ã©
-      console.log("Profil manquant, on le crÃ©e pour :", nomDirect);
-      const { error } = await supabase.from("profiles").upsert({
-        id: u.id,
-        nom: nomDirect,
-        boutique_nom: meta.boutique_nom || nomDirect,
-        telephone: waDirect,
-        whatsapp: waDirect,
-        email: u.email,
-        ville: "Bamako",
-        role: "vendeur",
-      }, { onConflict: "id" });
-      if (error) console.log("Erreur crÃ©ation profil dans Compte:", error.message);
-    }
-
-    const r = await supabase.from("produits").select("*").eq("user_id", u.id).order("created_at", { ascending: false });
-    if (r.data) setProduits(r.data);
-    setChargementCompte(false);
-  }
-  load();
-
-  // âœ… Si tu te connectes / dÃ©connectes pendant que la page est ouverte, Ã§a se met Ã  jour tout seul
-  const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-    if (session?.user) {
-      setUser(session.user);
-      load();
-    } else {
-      setUser(null);
-      setChargementCompte(false);
-    }
-  });
-  return () => listener.subscription.unsubscribe();
-}, []);
-
-  // âœ… NOUVEAU : Se connecter avec email + mot de passe
-  async function seConnecter() {
-    if (!loginEmail) return alert("Mets ton email");
-    if (!loginPass) return alert("Mets ton mot de passe");
-    setLoginLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPass });
-    setLoginLoading(false);
-    if (error) { alert("Erreur connexion: " + error.message + "\n\nVÃ©rifie que c'est le MÃŠME email que tu as utilisÃ© pour crÃ©er ta boutique."); return; }
-    if (data.user) {
-      setUser(data.user);
-      alert("âœ… ConnectÃ© ! Bienvenue " + (data.user.user_metadata?.boutique_nom || data.user.user_metadata?.full_name || ""));
-      window.location.reload();
-    }
-  }
-
-  async function seDeconnecter() {
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfil({ nom: "", full_name: "", telephone: "", phone: "", whatsapp: "", ville: "Bamako", quartier: "", email: "", role: "vendeur", boutique_nom: "" });
-    alert("DÃ©connectÃ©");
-  }
-
-  function upload(e: any, type: string, isEdit = false) {
-  const file = e.target.files[0]; if (!file) return;
-
-  // âœ… Si c'est une VIDÃ‰O, on ne compresse pas, on la prend telle quelle
-  // Mais on refuse si elle est trop lourde > 15 Mo
-  if (type === "video") {
-    if (file.size > 15 * 1024 * 1024) {
-      alert("VidÃ©o trop lourde ! Prends une vidÃ©o de moins de 15 secondes, ou coupe-la dans WhatsApp avant.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (isEdit) setEditForm((f) => ({ ...f, video_url: reader.result as string }));
-      else setPubForm((f) => ({ ...f, video_url: reader.result as string }));
-    };
-    reader.readAsDataURL(file);
-    return;
-  }
-
-  // âœ… Si c'est une PHOTO, on la compresse pour que ce soit SUPER RAPIDE
-  const img = new Image();
-  const url = URL.createObjectURL(file);
-  img.onload = () => {
-    const canvas = document.createElement("canvas");
-    const max = 800; // âœ… 800px c'est largement suffisant pour un tÃ©lÃ©phone
-    let w = img.width, h = img.height;
-    if (w > max) { h = h * max / w; w = max; }
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx?.drawImage(img, 0, 0, w, h);
-    const compresse = canvas.toDataURL("image/jpeg", 0.7); // âœ… 0.7 = 70% qualitÃ©, 30x plus lÃ©ger
-    URL.revokeObjectURL(url);
-    if (isEdit) setEditForm((f) => ({ ...f, image_url: compresse }));
-    else setPubForm((f) => ({ ...f, image_url: compresse }));
-    console.log("Photo compressÃ©e :", file.size, "->", compresse.length);
-  };
-  img.src = url;
+function lireCache(cle: string) {
+  try {
+    const c = localStorage.getItem(cle);
+    if (!c) return null;
+    return JSON.parse(c).data;
+  } catch { return null; }
+}
+function sauverCache(cle: string, data: any) {
+  try { localStorage.setItem(cle, JSON.stringify({ data, time: Date.now() })); } catch {}
+}
+function nettoyerWhatsapp(num: any) {
+  if (!num) return "";
+  let n = String(num).replace(/[^0-9]/g, "");
+  if (n.startsWith("00223")) n = n.slice(5);
+  else if (n.startsWith("223")) n = n.slice(3);
+  else if (n.startsWith("0")) n = n.slice(1);
+  if (n.length !== 8) return "";
+  return "223" + n;
 }
 
-  async function savePub() {
-    if (!pubForm.titre || !pubForm.prix || !pubForm.image_url) { alert("Titre, prix, photo obligatoires"); return; }
-    if (!pubForm.whatsapp) { alert("WhatsApp obligatoire"); return; }
-    // âœ… CORRIGÃ‰ : On re-vÃ©rifie la session JUSTE AVANT de publier
-    // Avant tu prenais le vieux `user` qui pouvait Ãªtre vide, d'oÃ¹ "Tu dois Ãªtre connectÃ©"
-    const { data: sess } = await supabase.auth.getSession();
-    const userActuel = sess.session?.user || user;
-    if (!userActuel) { alert("Tu dois Ãªtre connectÃ©. Connecte-toi d'abord, puis republie."); return; }
-    const payload: any = { user_id: userActuel.id, titre: pubForm.titre, prix: Number(pubForm.prix), categorie: pubForm.mode_produit, mode_produit: pubForm.mode_produit, ville: pubForm.ville, whatsapp: pubForm.whatsapp, description: pubForm.description, image_url: pubForm.image_url, video_url: pubForm.video_url || null, anonyme: true };
-    const { data, error } = await supabase.from("produits").insert(payload).select().single();
-    if (error) {
-      const { categorie, ...sansCat } = payload;
-      const retry = await supabase.from("produits").insert(sansCat).select().single();
-      if (retry.error) { alert("Erreur: " + retry.error.message); return; }
-      setProduits((prev) => [retry.data, ...prev]);
-    } else { setProduits((prev) => [data, ...prev]); }
-    setShowPub(false);
-    alert("âœ… PubliÃ© en ANONYME ! Tout le monde le voit sur Accueil");
-    setPubForm({ titre: "", prix: "", categorie: "Ã‰lectronique", mode_produit: "Ã‰lectronique", ville: "Bamako", whatsapp: profil.whatsapp || "", description: "", image_url: "", video_url: "", anonyme: true });
-    window.location.href = "/";
+export default function Compte() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(() => {
+    if (typeof window === "undefined") return null;
+    return lireCache("mm_cache_compte_user");
+  });
+  const [mesProduits, setMesProduits] = useState<any[]>(() => {
+    if (typeof window === "undefined") return [];
+    return lireCache("mm_cache_compte_produits") || [];
+  });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [nom, setNom] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [mode, setMode] = useState<"connexion" | "inscription">("connexion");
+  const [message, setMessage] = useState("");
+  const [suppressionEnCours, setSuppressionEnCours] = useState<string | null>(null);
+  const [titreProduit, setTitreProduit] = useState("");
+  const [prixProduit, setPrixProduit] = useState("");
+  const [categorieProduit, setCategorieProduit] = useState("Électronique");
+  const [descProduit, setDescProduit] = useState("");
+  const [publieEnCours, setPublieEnCours] = useState(false);
+  const [showPublier, setShowPublier] = useState(false);
+  const [photoProduit, setPhotoProduit] = useState<File | null>(null);
+  const [videoProduit, setVideoProduit] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [videoPreview, setVideoPreview] = useState("");
+  const [editWhatsapp, setEditWhatsapp] = useState(false);
+    const [popup, setPopup] = useState<"portefeuille" | "guide" | "favoris" | "commandes" | "assistance" | null>(null);
+  // 📱 NUMÉRO DU PROPRIÉTAIRE MM MALI - CHANGE ICI SI CE N'EST PAS LE BON
+  const WHATSAPP_PROPRIETAIRE = "22398196047";
+
+  async function chargerMesProduits(userWhatsapp: string) {
+  const propre = nettoyerWhatsapp(userWhatsapp);
+  if (!propre) { setMesProduits([]); return; }
+
+  const { data: p2 } = await supabase.from("produits").select("*").order("created_at", { ascending: false }).limit(50);
+  if (!p2) return;
+
+  // CORRECTION : On ne montre QUE mes produits. JAMAIS ceux des autres.
+  // On a supprimé le code qui disait "si pas trouvé, montre tout"
+  const mes = p2.filter((p: any) => nettoyerWhatsapp(p.whatsapp) === propre);
+  setMesProduits(mes);
+}
+
+  function sauvegarderWhatsapp() {
+    if (!whatsapp.trim()) { alert("Mets ton numéro WhatsApp."); return; }
+    const propre = whatsapp.trim();
+    const nouveauUser = { ...user, whatsapp: propre };
+    setUser(nouveauUser);
+    localStorage.setItem("mm_user", JSON.stringify(nouveauUser));
+    localStorage.setItem("mm_vendeur_whatsapp", propre);
+    localStorage.setItem("mm_whatsapp", propre);
+    sauverCache("mm_cache_compte_user", nouveauUser);
+    setEditWhatsapp(false);
+    alert("WhatsApp sauvegardé ✅ : " + propre);
+    void chargerMesProduits(propre);
   }
 
-  async function supprimerProduit(id: string, titre: string) {
-    const ok = confirm(`Tu veux vraiment supprimer "${titre}" ?`);
-    if (!ok) return;
-    setProduits((prev) => prev.filter((p) => p.id !== id));
-    const { error } = await supabase.from("produits").delete().eq("id", id);
-    if (error) { alert("Erreur suppression: " + error.message); return; }
-    alert("ðŸ—‘ï¸ Produit supprimÃ© !");
+  // ⭐ BOUTON PRO : OUVRE WHATSAPP DIRECT AVEC LE PROPRIÉTAIRE
+  function ouvrirWhatsAppPro() {
+    const msg = "Bonjour MM Mali, je veux devenir PRO - 2.000 F / mois.\n\nMon nom : " + (user?.nom || "Adama") + "\nMon WhatsApp : " + (user?.whatsapp || whatsapp || "") + "\n\nExplique-moi comment activer mon PRO s'il te plait.";
+    window.open("https://wa.me/" + WHATSAPP_PROPRIETAIRE + "?text=" + encodeURIComponent(msg), "_blank");
   }
 
-  function ouvrirModifier(p: any) {
-    setEditProduit(p);
-    setEditForm({ titre: p.titre || "", prix: String(p.prix || ""), mode_produit: p.mode_produit || p.categorie || "Ã‰lectronique", ville: p.ville || "Bamako", whatsapp: p.whatsapp || "", description: p.description || "", image_url: p.image_url || "", video_url: p.video_url || "" });
-    setShowEdit(true);
+  useEffect(() => {
+    try {
+      const sauve = localStorage.getItem("mm_user");
+      if (sauve) {
+        const u = JSON.parse(sauve);
+        setUser(u);
+        sauverCache("mm_cache_compte_user", u);
+        if (u.whatsapp) { setWhatsapp(u.whatsapp); void chargerMesProduits(u.whatsapp); }
+        if (u.nom) setNom(u.nom);
+        if (u.email) setEmail(u.email);
+        if (!u.whatsapp) void chargerMesProduits("");
+      }
+      const w = localStorage.getItem("mm_vendeur_whatsapp") || localStorage.getItem("mm_whatsapp") || "";
+      if (w && !sauve) { setWhatsapp(w); void chargerMesProduits(w); }
+    } catch {}
+  }, []);
+
+  async function handleAuth() {
+    if (!email.trim() || !password.trim()) { setMessage("Mets ton e-mail + mot de passe."); return; }
+    if (mode === "inscription" && (!nom.trim() || !whatsapp.trim())) { setMessage("Pour t'inscrire, mets ton nom + WhatsApp."); return; }
+    setMessage("Connexion...");
+    try {
+      if (mode === "connexion") {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) { setMessage("Erreur : " + error.message); return; }
+        const u = { email: email.trim(), nom: nom || data.user?.user_metadata?.nom || "Adama", whatsapp: whatsapp || data.user?.user_metadata?.whatsapp || "", id: data.user?.id };
+        localStorage.setItem("mm_user", JSON.stringify(u));
+        localStorage.setItem("mm_vendeur_whatsapp", u.whatsapp);
+        setUser(u);
+        sauverCache("mm_cache_compte_user", u);
+        setMessage("Bienvenue ✅");
+        if (u.whatsapp) void chargerMesProduits(u.whatsapp);
+        else void chargerMesProduits("");
+      } else {
+        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { nom: nom.trim(), whatsapp: whatsapp.trim() } } });
+        if (error) { setMessage("Erreur : " + error.message); return; }
+        const u = { email: email.trim(), nom: nom.trim(), whatsapp: whatsapp.trim(), id: data.user?.id };
+        localStorage.setItem("mm_user", JSON.stringify(u));
+        localStorage.setItem("mm_vendeur_whatsapp", u.whatsapp);
+        setUser(u);
+        sauverCache("mm_cache_compte_user", u);
+        setMessage("Compte créé ✅ Tu peux publier.");
+      }
+    } catch (e: any) { setMessage("Erreur : " + e.message); }
   }
 
-  async function sauvegarderModification() {
-    if (!editProduit) return;
-    if (!editForm.titre || !editForm.prix) { alert("Titre et prix obligatoires"); return; }
-    const { data, error } = await supabase.from("produits").update({ titre: editForm.titre, prix: Number(editForm.prix), categorie: editForm.mode_produit, mode_produit: editForm.mode_produit, ville: editForm.ville, whatsapp: editForm.whatsapp, description: editForm.description, image_url: editForm.image_url, video_url: editForm.video_url || null }).eq("id", editProduit.id).select().single();
-    if (error) { alert("Erreur: " + error.message); return; }
-    setProduits((prev) => prev.map((p) => p.id === editProduit.id ? data : p));
-    setShowEdit(false); setEditProduit(null);
-    alert("âœ… ModifiÃ© !");
+  function deconnexion() {
+    localStorage.removeItem("mm_user");
+    localStorage.removeItem("mm_cache_compte_user");
+    setUser(null);
+    setMesProduits([]);
+    setMessage("Déconnecté.");
   }
 
-  // âœ… NOUVEAU : Si chargement, on montre Chargement, pas une page vide
-  if (chargementCompte) {
-    return (
-      <div style={{ background: "#FFF9F5", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ fontWeight: 900 }}>â³ Chargement de ton Compte...</p>
+   async function supprimerProduit(id: string, produitWhatsapp: string) {
+  if (nettoyerWhatsapp(produitWhatsapp) !== nettoyerWhatsapp(user?.whatsapp || "")) {
+    alert("⛔ Ce n'est pas ton produit. Tu ne peux pas le supprimer.");
+    return;
+  }
+  if (!confirm("Supprimer ce produit ?")) return;
+  await supabase.from("produits").delete().eq("id", id);
+  setMesProduits((prev) => prev.filter((p: any) => p.id !== id));
+}
+  async function publierProduit() {
+    if (!titreProduit.trim() || !prixProduit.trim()) { alert("Mets le titre + prix."); return; }
+    if (!whatsapp.trim()) { alert("Mets ton WhatsApp dans ton profil."); return; }
+    setPublieEnCours(true);
+    let image_url = null;
+    let video_url = null;
+    try {
+      if (photoProduit) {
+        const nomFichier = `photo_${Date.now()}_${photoProduit.name.replace(/[^a-zA-Z0-9.-]/g, "")}`;
+        const { error: errPhoto } = await supabase.storage.from("produits").upload(nomFichier, photoProduit);
+        if (errPhoto) alert("Erreur photo : " + errPhoto.message);
+        else image_url = supabase.storage.from("produits").getPublicUrl(nomFichier).data.publicUrl;
+      }
+      if (videoProduit) {
+        const nomFichierVideo = `video_${Date.now()}_${videoProduit.name.replace(/[^a-zA-Z0-9.-]/g, "")}`;
+        const { error: errVideo } = await supabase.storage.from("produits").upload(nomFichierVideo, videoProduit);
+        if (errVideo) alert("Erreur vidéo : " + errVideo.message);
+        else video_url = supabase.storage.from("produits").getPublicUrl(nomFichierVideo).data.publicUrl;
+      }
+      const { data, error } = await supabase.from("produits").insert({
+        titre: titreProduit.trim(),
+        prix: Number(prixProduit),
+        categorie: categorieProduit,
+        description: descProduit.trim() || titreProduit.trim(),
+        whatsapp: whatsapp.trim(),
+        vendeur_nom: nom || user?.nom || "Vendeur MM Mali",
+        ville: "Bamako",
+        image_url: image_url,
+        video_url: video_url,
+      }).select().single();
+      if (error) { alert("Erreur publication : " + error.message); }
+      else {
+        alert("Produit publié avec photo / vidéo ✅");
+        const nouveau = { id: data.id, titre: data.titre, prix: data.prix, categorie: data.categorie, image_url: data.image_url, video_url: data.video_url, created_at: data.created_at };
+        const maj = [nouveau, ...mesProduits];
+        setMesProduits(maj);
+        sauverCache("mm_cache_compte_produits", maj);
+        setTitreProduit(""); setPrixProduit(""); setDescProduit("");
+        setPhotoProduit(null); setVideoProduit(null);
+        setPhotoPreview(""); setVideoPreview("");
+        setShowPublier(false);
+      }
+    } catch (e: any) { alert("Erreur : " + e.message); }
+    setPublieEnCours(false);
+  }
+
+  return (
+    <div style={{ background: "#F2F2F2", minHeight: "100dvh", display: "flex", justifyContent: "center" }}>
+    <div style={{ width: "100%", maxWidth: 430, background: "white", minHeight: "100dvh", display: "flex", flexDirection: "column", paddingBottom: 70 }}>
+      <div style={{ padding: "14px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <p style={{ fontWeight: 900, fontSize: 18, margin: 0 }}>MM <span style={{ color: "#FF6B35" }}>Mali</span> • Compte</p>
+        {user && <button onClick={deconnexion} style={{ background: "none", border: "none", color: "#888", fontSize: 12, fontWeight: 700 }}>Déconnexion</button>}
       </div>
-    );
-  }
 
-  // âœ… NOUVEAU : Si PAS CONNECTÃ‰, on affiche l'Ã©cran Se connecter, pas une page vide
-  // C'est Ã§a qui te manquait : avant tu voyais vide et tu ne savais pas que tu n'Ã©tais pas connectÃ©
-  if (!user) {
-    return (
-      <div style={{ background: "#FFF9F5", minHeight: "100vh", padding: "16px 12px 90px" }}>
-        <div style={{ background: "white", borderRadius: 16, padding: 16, maxWidth: 430, margin: "20px auto 0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 36, height: 36, background: "#FF6B35", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 900, fontSize: 14 }}>MM</div>
-            <div>
-              <p style={{ fontWeight: 900, fontSize: 15, margin: 0 }}>Connecte-toi Ã  MM Mali</p>
-              <p style={{ fontSize: 11, color: "#888", margin: "2px 0 0" }}>Utilise le MÃŠME email que pour crÃ©er ta boutique</p>
-            </div>
+      {!user ? (
+        <div style={{ padding: "0 14px" }}>
+          <div style={{ background: "#FFF7ED", borderRadius: 14, padding: 14, marginBottom: 12 }}>
+            <p style={{ fontWeight: 900, fontSize: 15, margin: "0 0 4px" }}>👋 Bienvenue sur MM Mali</p>
+            <p style={{ fontSize: 12, color: "#666", margin: 0 }}>Connecte-toi pour vendre à Bamako. C'est gratuit, 30 secondes.</p>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-            <label style={{ fontSize: 12, fontWeight: 900 }}>Adresse e-mail *</label>
-            <input value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} type="email" placeholder="Ex: awa@gmail.com" style={{ padding: "11px 12px", borderRadius: 10, border: "1px solid #eee", fontSize: 13 }} />
-            <label style={{ fontSize: 12, fontWeight: 900 }}>Mot de passe *</label>
-            <div style={{ position: "relative" }}>
-              <input value={loginPass} onChange={(e) => setLoginPass(e.target.value)} type={showLoginPass ? "text" : "password"} placeholder="Ton mot de passe" style={{ width: "100%", padding: "11px 12px", paddingRight: 40, borderRadius: 10, border: "1px solid #eee", boxSizing: "border-box", fontSize: 13 }} />
-              <button onClick={() => setShowLoginPass(!showLoginPass)} style={{ position: "absolute", right: 8, top: 8, background: "none", border: "none", fontSize: 16 }}>{showLoginPass ? "ðŸ™ˆ" : "ðŸ‘ï¸"}</button>
-            </div>
-            <button onClick={seConnecter} style={{ background: "black", color: "white", border: "none", padding: "13px 0", borderRadius: 999, fontWeight: "bold", fontSize: 13, marginTop: 4 }}>{loginLoading ? "Connexion..." : "Se connecter â†’"}</button>
-            <button onClick={() => { window.location.href = "/"; }} style={{ background: "white", color: "#333", border: "1px solid #eee", padding: "12px 0", borderRadius: 999, fontWeight: "bold", fontSize: 12 }}>â† Retour Accueil / CrÃ©er ma Boutique</button>
-            <p style={{ fontSize: 11, color: "#888", textAlign: "center", lineHeight: 1.4, margin: "4px 0 0" }}>Si tu as oubliÃ© ton email, c'est celui que tu as mis quand tu as crÃ©Ã© ta boutique. Si tu te connectes avec un autre email, tu verras un compte vide.</p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <button onClick={() => setMode("connexion")} style={{ flex: 1, background: mode === "connexion" ? "#111" : "#f2f2f2", color: mode === "connexion" ? "white" : "#333", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 13 }}>Connexion</button>
+            <button onClick={() => setMode("inscription")} style={{ flex: 1, background: mode === "inscription" ? "#FF6B35" : "#f2f2f2", color: mode === "inscription" ? "white" : "#333", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 13 }}>Inscription</button>
           </div>
+          {mode === "inscription" && (
+            <>
+              <input value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ton nom, ex: Adama" style={{ width: "100%", border: "1px solid #eee", borderRadius: 12, padding: "12px 14px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+              <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="Ton WhatsApp, ex: 98 19 60 47" style={{ width: "100%", border: "1px solid #eee", borderRadius: 12, padding: "12px 14px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+            </>
+          )}
+          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ton e-mail" style={{ width: "100%", border: "1px solid #eee", borderRadius: 12, padding: "12px 14px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" style={{ width: "100%", border: "1px solid #eee", borderRadius: 12, padding: "12px 14px", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+          <button onClick={handleAuth} style={{ width: "100%", background: "#FF6B35", color: "white", border: "none", padding: "13px 0", borderRadius: 999, fontWeight: 900, fontSize: 14 }}>{mode === "connexion" ? "Se connecter" : "Créer mon compte"}</button>
+          {message && <p style={{ textAlign: "center", fontSize: 12, color: "#555", marginTop: 10 }}>{message}</p>}
         </div>
-      </div>
-    );
-  }
-
-  if (vue !== "home") {
-    return (
-      <div style={{ background: "#FFF9F5", minHeight: "100vh", padding: 10 }}>
-        {/* âœ… CORRIGÃ‰ : Ce bloc Ã©tait dehors du return avant, il faisait planter. Maintenant il est dedans */}
-        <div style={{ background: "white", borderRadius: 14, padding: "12px", display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <div style={{ width: 48, height: 48, background: "#FF6B35", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 20, fontWeight: 900 }}>
-            {lettre}
-          </div>
-          <div style={{ flex: 1 }}>
-            <p style={{ fontWeight: 900, fontSize: 15, margin: 0 }}>{nomAffiche}</p>
-            <p style={{ fontSize: 11, color: "#25D366", fontWeight: "bold", margin: "2px 0 0" }}>ðŸ“± {whatsappAffiche}</p>
-            <p style={{ fontSize: 11, color: "#888", margin: "1px 0 0" }}>ðŸ“§ {profil.email || user?.email || ""}</p>
-            <p style={{ fontSize: 11, color: "#888", margin: "1px 0 0" }}>ðŸ“ {profil.ville || "Bamako"} â€¢ â­ {profil.role || "vendeur"}</p>
-            <span style={{ background: "#E6FFED", color: "green", fontSize: 9, padding: "2px 7px", borderRadius: 999, fontWeight: "bold" }}>âœ“ COMPTE VÃ‰RIFIÃ‰</span>
-          </div>
-          <span style={{ background: "#FFF1E8", padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: "bold" }}>{solde} F</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "white", padding: 10, borderRadius: 12 }}>
-          <button onClick={() => setVue("home")} style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "#FFF1E8", fontSize: 16 }}>â†</button>
-          <p style={{ fontWeight: 900, margin: 0, fontSize: 14 }}>{vue === "commandes" && "Mes Commandes ðŸ“¦"} {vue === "favoris" && "Mes Favoris â¤ï¸"} {vue === "stories" && "Mes Stories ðŸ“¸"} {vue === "portefeuille-profil" && "Mon Portefeuille et Mon Profil"} {vue === "portefeuille" && "Portefeuille"} {vue === "solde" && "Solde"} {vue === "profil" && "Modifier mon profil"} {vue === "localisations" && "Mes Localisations"} {vue === "reference" && "RÃ©fÃ©rence"} {vue === "assistance" && "Assistance et LÃ©gal"} {vue === "tutoriel" && "Tutoriel et Guide VidÃ©o"} {vue === "faq" && "Centre d'aide FAQ"} {vue === "confidentialite" && "ConfidentialitÃ©"} {vue === "publications" && "Produits PubliÃ©s"}</p>
-        </div>
-        <div style={{ marginTop: 10 }}>
-          {vue === "commandes" && <div style={{ background: "white", borderRadius: 14, padding: 14 }}><p style={{ fontWeight: 900 }}>Aucune commande</p></div>}
-          {vue === "favoris" && <div style={{ background: "white", borderRadius: 14, padding: 14 }}><p style={{ fontWeight: 900 }}>â¤ï¸ Aucun favori</p></div>}
-          {vue === "stories" && <div style={{ background: "white", borderRadius: 14, padding: 14, textAlign: "center" }}><p style={{ fontSize: 36 }}>ðŸ“¸</p><p style={{ fontWeight: 900 }}>Mes Stories</p></div>}
-          {vue === "portefeuille-profil" && <div style={{ display: "flex", flexDirection: "column", gap: 8 }}><button onClick={() => setVue("portefeuille")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸ’¼ Portefeuille â€º</button><button onClick={() => setVue("solde")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸ’° Solde : {solde} F â€º</button><button onClick={() => setVue("profil")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸ‘¤ Modifier mon profil â€º</button><button onClick={() => setVue("localisations")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸ“ Mes Localisations â€º</button></div>}
-          {vue === "portefeuille" && <div style={{ background: "black", color: "white", borderRadius: 16, padding: 18, textAlign: "center" }}><p style={{ fontSize: 11, opacity: 0.7, margin: 0 }}>PORTEFEUILLE MM MALI</p><p style={{ fontSize: 30, fontWeight: 900, margin: "8px 0" }}>{solde.toLocaleString()} F</p><button onClick={() => setVue("solde")} style={{ background: "#FF6B35", color: "white", border: "none", padding: "10px 20px", borderRadius: 999, fontWeight: "bold" }}>+ DÃ©pÃ´t</button></div>}
-          {vue === "solde" && <div style={{ background: "white", borderRadius: 16, padding: 16 }}><p style={{ fontWeight: 900, textAlign: "center" }}>Ton Solde : {solde.toLocaleString()} F</p><input value={montant} onChange={(e) => setMontant(e.target.value)} type="number" placeholder="Ex: 10000" style={{ width: "100%", padding: 12, borderRadius: 12, border: "1px solid #eee", boxSizing: "border-box" }} /><button onClick={() => { if (Number(montant) >= 5000) { setSolde(solde + Number(montant)); setMontant(""); alert("DÃ©pÃ´t rÃ©ussi"); } else alert("Minimum 5000 F"); }} style={{ width: "100%", background: "black", color: "white", border: "none", padding: "13px 0", borderRadius: 999, fontWeight: "bold", marginTop: 10 }}>Faire un dÃ©pÃ´t</button></div>}
-          {vue === "profil" && <div style={{ background: "white", borderRadius: 16, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-            <p style={{ fontSize: 12, color: "#888", margin: 0 }}>Email : {profil.email}</p>
-            <input value={profil.nom} onChange={(e) => setProfil({ ...profil, nom: e.target.value, full_name: e.target.value })} placeholder="Nom complet" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <input value={profil.telephone} onChange={(e) => setProfil({ ...profil, telephone: e.target.value, whatsapp: e.target.value, phone: e.target.value })} placeholder="WhatsApp / TÃ©lÃ©phone" style={{ padding: 12, borderRadius: 12, border: "2px solid #25D366" }} />
-            <input value={profil.boutique_nom} onChange={(e) => setProfil({ ...profil, boutique_nom: e.target.value })} placeholder="Nom de ta boutique" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <button onClick={async () => { await supabase.from("profiles").upsert({ id: user.id, nom: profil.nom, telephone: profil.telephone, whatsapp: profil.telephone, ville: profil.ville, quartier: profil.quartier, email: profil.email, boutique_nom: profil.boutique_nom, role: "vendeur" }, { onConflict: "id" }); alert("Profil sauvegardÃ©"); }} style={{ background: "black", color: "white", border: "none", padding: "13px 0", borderRadius: 999, fontWeight: "bold" }}>Enregistrer</button>
-          </div>}
-          {vue === "localisations" && <div style={{ background: "white", borderRadius: 14, padding: 14 }}><p style={{ fontWeight: 900 }}>ðŸ“ Mes Localisations</p><p style={{ fontSize: 12, color: "#888" }}>{profil.ville}, {profil.quartier}</p></div>}
-          {vue === "reference" && <div style={{ background: "white", borderRadius: 16, padding: 16 }}><p style={{ fontWeight: 900 }}>ðŸ“– RÃ©fÃ©rence - Guide Local en Bambara</p><p style={{ fontSize: 12 }}>I bÉ› se ka feere san MM Mali kan.</p></div>}
-          {vue === "assistance" && <div style={{ display: "flex", flexDirection: "column", gap: 8 }}><button onClick={() => setVue("tutoriel")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸŽ¥ Tutoriel et Guide VidÃ©o â€º</button><button onClick={() => setVue("faq")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>â“ Centre d'aide FAQ â€º</button><button onClick={() => setVue("confidentialite")} style={{ background: "white", borderRadius: 12, padding: 14, border: "none", textAlign: "left", width: "100%", fontWeight: 900 }}>ðŸ”’ ConfidentialitÃ© â€º</button></div>}
-          {vue === "tutoriel" && <div style={{ background: "white", borderRadius: 16, padding: 14 }}><p style={{ fontWeight: 900 }}>ðŸŽ¥ Tutoriel</p><div style={{ background: "#111", borderRadius: 12, height: 170, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 36 }}>â–¶ï¸</div></div>}
-          {vue === "faq" && <div style={{ background: "white", borderRadius: 16, padding: 14 }}><p style={{ fontWeight: 900 }}>â“ FAQ</p><p style={{ fontSize: 12 }}>Comment publier ? Va sur Compte â†’ Publier.</p></div>}
-          {vue === "confidentialite" && <div style={{ background: "white", borderRadius: 16, padding: 16 }}><p style={{ fontWeight: 900 }}>ðŸ”’ ConfidentialitÃ©</p><p style={{ fontSize: 13, lineHeight: 1.6 }}>Tes donnÃ©es sont protÃ©gÃ©es.</p></div>}
-          {vue === "publications" && <div>
-            <button onClick={() => { setPubForm({ titre: "", prix: "", categorie: "Ã‰lectronique", mode_produit: "Ã‰lectronique", ville: "Bamako", whatsapp: profil.whatsapp || "", description: "", image_url: "", video_url: "", anonyme: true }); setShowPub(true); }} style={{ width: "100%", background: "black", color: "white", border: "none", padding: "13px 0", borderRadius: 999, fontWeight: "bold" }}>+ Publier un produit</button>
-            <p style={{ fontSize: 11, color: "#888", margin: "8px 0 0" }}>{produits.length} produits publiÃ©s</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
-              {produits.map((p) => (
-                <div key={p.id} style={{ background: "white", borderRadius: 12, overflow: "hidden", border: "1px solid #f0f0f0" }}>
-                  <div style={{ position: "relative" }}>
-                    {p.image_url ? <img src={p.image_url} loading="lazy" style={{ width: "100%", height: 120, objectFit: "cover" }} /> : <div style={{ width: "100%", height: 120, background: "#eee", display: "flex", alignItems: "center", justifyContent: "center" }}>ðŸŽ¬ VidÃ©o</div>}
-                    <span style={{ position: "absolute", top: 6, left: 6, background: "#FF6B35", color: "white", fontSize: 9, padding: "3px 7px", borderRadius: 999, fontWeight: "bold" }}>{p.mode_produit || p.categorie || "Ã‰lectronique"}</span>
+      ) : (
+        <div style={{ padding: "0 14px" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", background: "#FFF7ED", borderRadius: 14, padding: 14, marginBottom: 12 }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#FF6B35", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, flexShrink: 0 }}>{(user.nom || "A")[0].toUpperCase()}</div>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 900, fontSize: 16, margin: "0 0 2px" }}>{user.nom || "Adama"}</p>
+              {!editWhatsapp ? (
+                <>
+                  <p style={{ fontSize: 12, color: "#666", margin: "0 0 2px" }}>📱 {user.whatsapp || whatsapp || "Pas de WhatsApp"} <button onClick={() => setEditWhatsapp(true)} style={{ background: "none", border: "none", color: "#FF6B35", fontSize: 11, fontWeight: 900 }}>✏️ Modifier</button></p>
+                  <p style={{ fontSize: 12, color: "#666", margin: 0 }}>📧 {user.email}</p>
+                </>
+              ) : (
+                <>
+                  <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="Ton WhatsApp, ex: 98 19 60 47" style={{ width: "100%", border: "1px solid #FF6B35", borderRadius: 10, padding: "10px 12px", fontSize: 13, outline: "none", marginBottom: 6, boxSizing: "border-box" }} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={sauvegarderWhatsapp} style={{ flex: 1, background: "#22C55E", color: "white", border: "none", padding: "9px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>✅ Sauvegarder</button>
+                    <button onClick={() => setEditWhatsapp(false)} style={{ flex: 1, background: "#eee", color: "#333", border: "none", padding: "9px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>Annuler</button>
                   </div>
-                  <div style={{ padding: 8 }}>
-                    <p style={{ fontSize: 11, fontWeight: "bold", margin: 0 }}>{p.titre}</p>
-                    <p style={{ fontSize: 12, fontWeight: 900, margin: "3px 0" }}>{Number(p.prix).toLocaleString()} F</p>
-                    <p style={{ fontSize: 10, color: "#25D366", fontWeight: "bold", margin: 0 }}>ðŸ“± {p.whatsapp}</p>
-                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                      <button onClick={() => ouvrirModifier(p)} style={{ flex: 1, background: "#FFF1E8", color: "#FF6B35", border: "none", padding: "7px 0", borderRadius: 999, fontSize: 11, fontWeight: "bold" }}>âœï¸ Modifier</button>
-                      <button onClick={() => supprimerProduit(p.id, p.titre)} style={{ flex: 1, background: "#FFE8E8", color: "red", border: "none", padding: "7px 0", borderRadius: 999, fontSize: 11, fontWeight: "bold" }}>ðŸ—‘ï¸ Supprimer</button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div style={{ background: "#111", color: "white", borderRadius: 14, padding: 14, marginBottom: 12 }}>
+            <p style={{ fontSize: 11, opacity: 0.7, margin: "0 0 2px" }}>TON SOLDE MM MALI</p>
+            <p style={{ fontWeight: 900, fontSize: 22, margin: "0 0 4px" }}>500 F</p>
+            <p style={{ fontSize: 11, opacity: 0.7, margin: "0 0 10px" }}>Tu as {mesProduits.length} produit(s) en ligne</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShowPublier(!showPublier)} style={{ flex: 1, background: "#FF6B35", color: "white", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>+ Publier un produit</button>
+              <button onClick={ouvrirWhatsAppPro} style={{ flex: 1, background: "white", color: "#111", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>⭐ Devenir PRO - 2.000 F</button>
+            </div>
+          </div>
+
+
+                    {/* ===== PARTAGER MM MALI ===== */}
+          <div style={{ background: "#111", borderRadius: 14, padding: 14, marginTop: 14 }}>
+            <p style={{ color: "white", fontWeight: 900, fontSize: 15, margin: "0 0 4px" }}>📣 Fais grandir MM Mali !</p>
+            <p style={{ color: "#ccc", fontSize: 12, margin: "0 0 12px" }}>Partage le lien, tes amis à Bamako vont vendre aussi.</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => {
+                const lien = "https://mmmali-imvxjpv2b-mmmali.vercel.app";
+                const texte = "Regarde MM Mali 🇲🇱, tu peux vendre à Bamako gratuitement ! " + lien;
+                window.open("https://wa.me/?text=" + encodeURIComponent(texte), "_blank");
+              }} style={{ flex: 1, background: "#25D366", color: "white", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>WhatsApp</button>
+              <button onClick={() => {
+                const lien = "https://mmmali-imvxjpv2b-mmmali.vercel.app";
+                window.open("https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(lien), "_blank");
+              }} style={{ flex: 1, background: "#1877F2", color: "white", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>Facebook</button>
+              <button onClick={() => {
+                const lien = "https://mmmali-imvxjpv2b-mmmali.vercel.app";
+                navigator.clipboard.writeText(lien);
+                alert("Lien copié ✅ Colle-le sur TikTok / Instagram");
+              }} style={{ flex: 1, background: "white", color: "#111", border: "none", padding: "10px 0", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>Copier lien</button>
+            </div>
+          </div>
+
+                    {/* ===== MON ACTIVITÉ ===== */}
+          <p style={{ fontWeight: 900, fontSize: 12, color: "#888", margin: "18px 0 8px" }}>MON ACTIVITÉ</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setPopup("commandes")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>📦</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Commandes</span>
+            </button>
+            <button onClick={() => setPopup("favoris")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>❤️</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Favoris</span>
+            </button>
+            <button onClick={() => router.push("/reels")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>📸</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Stories</span>
+            </button>
+          </div>
+
+          <p style={{ fontWeight: 900, fontSize: 12, color: "#888", margin: "18px 0 8px" }}>MON PORTEFEUILLE ET MON PROFIL</p>
+          <button onClick={() => setPopup("portefeuille")} style={{ width: "100%", background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 900, fontSize: 14, color: "#2563EB" }}>💼 Mon Portefeuille et Mon Profil</span><span style={{ color: "#2563EB" }}>›</span>
+          </button>
+
+          <p style={{ fontWeight: 900, fontSize: 12, color: "#888", margin: "18px 0 8px" }}>RÉFÉRENCE</p>
+          <button onClick={() => setPopup("guide")} style={{ width: "100%", background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 900, fontSize: 14, color: "#2563EB" }}>📖 Référence - Guide en Bambara</span><span style={{ color: "#2563EB" }}>›</span>
+          </button>
+
+          <p style={{ fontWeight: 900, fontSize: 12, color: "#888", margin: "18px 0 8px" }}>ASSISTANCE ET LÉGAL</p>
+          <button onClick={() => setPopup("assistance")} style={{ width: "100%", background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 900, fontSize: 14, color: "#2563EB" }}>🛟 Assistance et Légal</span><span style={{ color: "#2563EB" }}>›</span>
+          </button>
+
+          {/* ===== LES VRAIES FENÊTRES - PLUS DE ALERT() ===== */}
+          {popup && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setPopup(null)}>
+              <div style={{ background: "white", width: "100%", maxWidth: 430, borderRadius: "18px 18px 0 0", padding: 20, maxHeight: "80dvh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <p style={{ fontWeight: 900, fontSize: 17, margin: 0 }}>
+                    {popup === "portefeuille" && "💼 Mon Portefeuille"}
+                    {popup === "guide" && "📖 Guide en Bambara"}
+                    {popup === "favoris" && "❤️ Mes Favoris"}
+                    {popup === "commandes" && "📦 Mes Commandes"}
+                    {popup === "assistance" && "🛟 Assistance et Légal"}
+                  </p>
+                  <button onClick={() => setPopup(null)} style={{ background: "#f2f2f2", border: "none", borderRadius: "50%", width: 30, height: 30, fontWeight: 900 }}>✕</button>
+                </div>
+
+                {popup === "portefeuille" && (
+                  <>
+                    <div style={{ background: "#111", color: "white", borderRadius: 14, padding: 16, marginBottom: 12 }}>
+                      <p style={{ fontSize: 11, opacity: 0.7, margin: "0 0 2px" }}>TON SOLDE</p>
+                      <p style={{ fontWeight: 900, fontSize: 26, margin: "0 0 4px" }}>500 F</p>
+                      <p style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>Tu as {mesProduits.length} produit(s) en ligne</p>
                     </div>
+                    <p style={{ fontSize: 13, margin: "0 0 4px" }}><b>Nom :</b> {user?.nom}</p>
+                    <p style={{ fontSize: 13, margin: "0 0 4px" }}><b>WhatsApp :</b> {user?.whatsapp || whatsapp || "Pas de WhatsApp"}</p>
+                    <p style={{ fontSize: 13, margin: "0 0 12px" }}><b>E-mail :</b> {user?.email}</p>
+                    <button onClick={ouvrirWhatsAppPro} style={{ width: "100%", background: "#FF6B35", color: "white", border: "none", padding: "12px 0", borderRadius: 999, fontWeight: 900, fontSize: 13 }}>⭐ Devenir PRO - 2.000 F</button>
+                  </>
+                )}
+
+                {popup === "guide" && (
+                  <>
+                    <p style={{ fontSize: 14, fontWeight: 900, margin: "0 0 8px" }}>I ni ce ! Bienvenue sur MM Mali 🇲🇱</p>
+                    <p style={{ fontSize: 13, lineHeight: 1.6, margin: "0 0 8px" }}>1. <b>I ka produit publier :</b> Clique sur + Publier un produit, mets photo, prix, WhatsApp.</p>
+                    <p style={{ fontSize: 13, lineHeight: 1.6, margin: "0 0 8px" }}>2. <b>Client bé i wele :</b> Il te parle sur WhatsApp, tu discutes, tu vends.</p>
+                    <p style={{ fontSize: 13, lineHeight: 1.6, margin: "0 0 8px" }}>3. <b>I ka PRO kè :</b> Si tu veux plus de clients, clique Devenir PRO - 2.000 F, tu parles au propriétaire sur WhatsApp.</p>
+                    <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>4. <b>Kana i ka WhatsApp changè :</b> Mets toujours ton vrai numéro, sinon client té i sɔrɔ.</p>
+                  </>
+                )}
+
+                {popup === "favoris" && (
+                  <p style={{ fontSize: 13, color: "#666", margin: 0 }}>Tu n'as pas encore de favoris. ❤️<br />Va sur Accueil, clique sur le ❤️ d'un produit pour le garder ici.</p>
+                )}
+
+                {popup === "commandes" && (
+                  <p style={{ fontSize: 13, color: "#666", margin: 0 }}>Tu n'as pas encore de commandes.<br />Quand un client te parle sur WhatsApp et achète, tu le verras ici.<br /><br />Va sur <b>Messagerie</b> pour voir tes discussions.</p>
+                )}
+
+                {popup === "assistance" && (
+                  <>
+                    <p style={{ fontSize: 13, lineHeight: 1.6, margin: "0 0 10px" }}>Un problème ? Tu parles direct au propriétaire de MM Mali sur WhatsApp. Il t'aide vite.</p>
+                    <p style={{ fontSize: 13, margin: "0 0 12px" }}><b>📱 Propriétaire :</b> 98 19 60 47<br /><b>📍 Ville :</b> Bamako, Mali</p>
+                    <button onClick={ouvrirWhatsAppPro} style={{ width: "100%", background: "#25D366", color: "white", border: "none", padding: "12px 0", borderRadius: 999, fontWeight: 900, fontSize: 13, marginBottom: 10 }}>💬 Parler au propriétaire sur WhatsApp</button>
+                    <p style={{ fontSize: 11, color: "#888", lineHeight: 1.5, margin: 0 }}>En utilisant MM Mali, tu acceptes que les vendeurs et les clients se parlent sur WhatsApp. MM Mali ne gère pas les paiements entre vous. Faites attention, ne donnez jamais votre code.</p>
+                  </>
+                )}
+
+                <button onClick={() => setPopup(null)} style={{ width: "100%", background: "#f2f2f2", border: "none", padding: "11px 0", borderRadius: 999, fontWeight: 900, fontSize: 13, marginTop: 16 }}>Fermer</button>
+              </div>
+            </div>
+          )}
+          <p style={{ fontWeight: 900, fontSize: 12, color: "#888", margin: "18px 0 8px", letterSpacing: 0.5 }}>MON ACTIVITÉ</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => router.push("/messagerie")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>📦</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Commandes</span>
+            </button>
+            <button onClick={() => alert("Tes Favoris arrivent bientôt ❤️")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>❤️</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Favoris</span>
+            </button>
+            <button onClick={() => router.push("/reels")} style={{ flex: 1, background: "white", border: "1px solid #eee", borderRadius: 14, padding: "14px 6px", textAlign: "left" }}>
+              <span style={{ fontSize: 22 }}>📸</span><br /><span style={{ fontWeight: 900, fontSize: 13, color: "#2563EB" }}>Mes Stories</span>
+            </button>
+          </div>
+
+          
+          {showPublier && (
+            <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 12, marginBottom: 12 }}>
+              <p style={{ fontWeight: 900, fontSize: 14, margin: "0 0 8px" }}>📦 Publier un produit</p>
+              <input value={titreProduit} onChange={(e) => setTitreProduit(e.target.value)} placeholder="Titre, ex: iPhone 12 Pro" style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+              <input value={prixProduit} onChange={(e) => setPrixProduit(e.target.value)} placeholder="Prix en F, ex: 135000" type="number" style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+              <select value={categorieProduit} onChange={(e) => setCategorieProduit(e.target.value)} style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }}>
+                <option>Électronique</option><option>Mode</option><option>Restaurant</option><option>Sport</option><option>Maison</option><option>Beauté</option><option>Autre</option>
+              </select>
+              <textarea value={descProduit} onChange={(e) => setDescProduit(e.target.value)} placeholder="Description..." style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box", minHeight: 60 }} />
+              <p style={{ fontWeight: 900, fontSize: 13, margin: "10px 0 6px" }}>📸 Photo du produit</p>
+              <label style={{ display: "block", border: "2px dashed #ddd", borderRadius: 12, padding: 14, textAlign: "center", cursor: "pointer", background: "#FAFAFA" }}>
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) { setPhotoProduit(f); setPhotoPreview(URL.createObjectURL(f)); } }} />
+                {photoPreview ? <img src={photoPreview} style={{ width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 10 }} /> : <span style={{ fontSize: 13, color: "#666" }}>📸 Clique pour choisir une photo<br /><span style={{ fontSize: 11, color: "#999" }}>Depuis ta galerie</span></span>}
+              </label>
+              {photoPreview && <button onClick={() => { setPhotoProduit(null); setPhotoPreview(""); }} style={{ background: "none", border: "none", color: "#E11D48", fontSize: 12, fontWeight: 900, marginTop: 4 }}>✕ Retirer la photo</button>}
+              <p style={{ fontWeight: 900, fontSize: 13, margin: "14px 0 6px" }}>🎥 Vidéo du produit (pour Reels)</p>
+              <label style={{ display: "block", border: "2px dashed #ddd", borderRadius: 12, padding: 14, textAlign: "center", cursor: "pointer", background: "#FAFAFA" }}>
+                <input type="file" accept="video/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 50 * 1024 * 1024) { alert("Vidéo trop lourde. Moins de 50 Mo."); return; } setVideoProduit(f); setVideoPreview(URL.createObjectURL(f)); } }} />
+                {videoPreview ? <video src={videoPreview} controls style={{ width: "100%", maxHeight: 180, borderRadius: 10 }} /> : <span style={{ fontSize: 13, color: "#666" }}>🎥 Clique pour choisir une vidéo<br /><span style={{ fontSize: 11, color: "#999" }}>Moins de 50 Mo, pour Reels</span></span>}
+              </label>
+              {videoPreview && <button onClick={() => { setVideoProduit(null); setVideoPreview(""); }} style={{ background: "none", border: "none", color: "#E11D48", fontSize: 12, fontWeight: 900, marginTop: 4 }}>✕ Retirer la vidéo</button>}
+              <button onClick={publierProduit} disabled={publieEnCours} style={{ width: "100%", background: publieEnCours ? "#ccc" : "#22C55E", color: "white", border: "none", padding: "12px 0", borderRadius: 999, fontWeight: 900, fontSize: 13, marginTop: 14 }}>{publieEnCours ? "Publication..." : "Publier maintenant"}</button>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <p style={{ fontWeight: 900, fontSize: 14, margin: 0 }}>Mes produits • {mesProduits.length}</p>
+            <button onClick={() => void chargerMesProduits(whatsapp || user.whatsapp || "")} style={{ background: "none", border: "none", color: "#FF6B35", fontSize: 12, fontWeight: 900 }}>↻ Actualiser</button>
+          </div>
+          {mesProduits.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 20, border: "1px dashed #ddd", borderRadius: 14 }}>
+              <p style={{ fontSize: 30, margin: "0 0 6px" }}>📦</p>
+              <p style={{ fontSize: 13, color: "#888", margin: "0 0 10px" }}>Tu n'as pas encore de produit.<br />Publie ton premier produit, c'est gratuit.</p>
+              <button onClick={() => setShowPublier(true)} style={{ background: "#FF6B35", color: "white", border: "none", padding: "10px 18px", borderRadius: 999, fontWeight: 900, fontSize: 12 }}>+ Publier mon 1er produit</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {mesProduits.map((p: any) => (
+                <div key={p.id} style={{ display: "flex", gap: 10, border: "1px solid #eee", borderRadius: 12, padding: 10, alignItems: "center" }}>
+                  <div style={{ width: 64, height: 64, borderRadius: 10, background: "#f2f2f2", overflow: "hidden", flexShrink: 0 }}>
+                    {p.image_url ? <img src={p.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📦</div>}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontWeight: 900, fontSize: 13, margin: "0 0 2px" }}>{p.titre}</p>
+                    <p style={{ fontWeight: 900, fontSize: 12, color: "#FF6B35", margin: "0 0 2px" }}>{Number(p.prix).toLocaleString()} F • {p.categorie}</p>
+                    <p style={{ fontSize: 11, color: "#888", margin: 0 }}>{p.video_url ? "🎥 Vidéo • " : ""}En ligne • Bamako</p>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <button onClick={() => router.push("/reels")} style={{ background: "#111", color: "white", border: "none", padding: "7px 12px", borderRadius: 999, fontWeight: 900, fontSize: 11 }}>Voir</button>
+                    <button onClick={() => supprimerProduit(p.id, p.whatsapp)} disabled={suppressionEnCours === String(p.id)} style={{ background: suppressionEnCours === String(p.id) ? "#ccc" : "#FEE2E2", color: "#E11D48", border: "none", padding: "7px 12px", borderRadius: 999, fontWeight: 900, fontSize: 11 }}>{suppressionEnCours === String(p.id) ? "..." : "🗑️ Supprimer"}</button>
                   </div>
                 </div>
               ))}
             </div>
-            {produits.length === 0 && <div style={{ background: "white", borderRadius: 12, padding: 18, textAlign: "center", marginTop: 10 }}><p style={{ fontWeight: 900 }}>Aucun produit publiÃ©</p></div>}
-          </div>}
+          )}
+          {message && <p style={{ textAlign: "center", fontSize: 12, color: "#555", marginTop: 12 }}>{message}</p>}
         </div>
-        {showPub && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}><div style={{ background: "white", width: "100%", maxWidth: 430, borderRadius: "22px 22px 0 0", padding: 16, paddingBottom: 40, maxHeight: "92vh", overflow: "auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><p style={{ fontWeight: 900 }}>Publier un produit</p><button onClick={() => setShowPub(false)} style={{ width: 30, height: 30, borderRadius: "50%", border: "none" }}>X</button></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-            <input value={pubForm.titre} onChange={(e) => setPubForm({ ...pubForm, titre: e.target.value })} placeholder="Titre Ex: iPhone 13" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <input value={pubForm.prix} onChange={(e) => setPubForm({ ...pubForm, prix: e.target.value })} type="number" placeholder="Prix Ex: 15000" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <select value={pubForm.mode_produit} onChange={(e) => setPubForm({ ...pubForm, mode_produit: e.target.value, categorie: e.target.value })} style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", fontWeight: "bold", background: "white" }}>{MODES.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-            <input value={pubForm.whatsapp} onChange={(e) => setPubForm({ ...pubForm, whatsapp: e.target.value })} placeholder="WhatsApp Ex: 98 19 60 47" style={{ padding: 12, borderRadius: 12, border: "2px solid #25D366", fontWeight: "bold" }} />
-            <label style={{ border: "2px dashed #ddd", borderRadius: 12, padding: 12, textAlign: "center", display: "block" }}>{pubForm.image_url ? <img src={pubForm.image_url} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10 }} /> : "ðŸ“¸ Choisir Photo *"}<input type="file" accept="image/*" onChange={(e) => upload(e, "image")} style={{ display: "none" }} /></label>
-            <label style={{ border: "2px dashed #ddd", borderRadius: 12, padding: 12, textAlign: "center", display: "block" }}>{pubForm.video_url ? <video src={pubForm.video_url} style={{ width: "100%", height: 120 }} controls /> : "ðŸŽ¬ Choisir VidÃ©o"}<input type="file" accept="video/*" onChange={(e) => upload(e, "video")} style={{ display: "none" }} /></label>
-            <textarea value={pubForm.description} onChange={(e) => setPubForm({ ...pubForm, description: e.target.value })} placeholder="Description..." style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", height: 60 }} />
-            <button onClick={savePub} style={{ background: "black", color: "white", border: "none", padding: "14px 0", borderRadius: 999, fontWeight: "bold" }}>Publier pour tout le monde â†’</button>
-            <div style={{ height: 20 }}></div>
-          </div>
-        </div></div>}
-        {showEdit && editProduit && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 10000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}><div style={{ background: "white", width: "100%", maxWidth: 430, borderRadius: "22px 22px 0 0", padding: 16, paddingBottom: 40, maxHeight: "92vh", overflow: "auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><p style={{ fontWeight: 900 }}>âœï¸ Modifier</p><button onClick={() => setShowEdit(false)} style={{ width: 30, height: 30, borderRadius: "50%", border: "none" }}>X</button></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
-            <input value={editForm.titre} onChange={(e) => setEditForm({ ...editForm, titre: e.target.value })} placeholder="Titre" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <input value={editForm.prix} onChange={(e) => setEditForm({ ...editForm, prix: e.target.value })} type="number" placeholder="Prix" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }} />
-            <select value={editForm.mode_produit} onChange={(e) => setEditForm({ ...editForm, mode_produit: e.target.value })} style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", fontWeight: "bold", background: "white" }}>{MODES.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-            <input value={editForm.whatsapp} onChange={(e) => setEditForm({ ...editForm, whatsapp: e.target.value })} placeholder="WhatsApp" style={{ padding: 12, borderRadius: 12, border: "2px solid #25D366", fontWeight: "bold" }} />
-            <label style={{ border: "2px dashed #ddd", borderRadius: 12, padding: 12, textAlign: "center", display: "block" }}>{editForm.image_url ? <img src={editForm.image_url} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10 }} /> : "ðŸ“¸ Changer Photo"}<input type="file" accept="image/*" onChange={(e) => upload(e, "image", true)} style={{ display: "none" }} /></label>
-            <label style={{ border: "2px dashed #FF6B35", borderRadius: 12, padding: 12, textAlign: "center", display: "block", background: "#FFF9F5" }}>
-              {editForm.video_url ? <video src={editForm.video_url} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10 }} controls /> : "ðŸŽ¬ Changer VidÃ©o / Ajouter une vidÃ©o"}
-              <input type="file" accept="video/*" onChange={(e) => upload(e, "video", true)} style={{ display: "none" }} />
-            </label>
-            <button type="button" onClick={() => setEditForm({ ...editForm, video_url: "" })} style={{ background: "#FFE8E8", color: "red", border: "none", padding: "8px 0", borderRadius: 999, fontSize: 11, fontWeight: "bold" }}>ðŸ—‘ï¸ Enlever la vidÃ©o</button>
-            <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} placeholder="Description" style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", height: 60 }} />
-            <button onClick={sauvegarderModification} style={{ background: "black", color: "white", border: "none", padding: "14px 0", borderRadius: 999, fontWeight: "bold" }}>Enregistrer âœ…</button>
-            <button onClick={() => supprimerProduit(editProduit.id, editProduit.titre)} style={{ background: "#FFE8E8", color: "red", border: "none", padding: "12px 0", borderRadius: 999, fontWeight: "bold" }}>ðŸ—‘ï¸ Supprimer</button>
-          </div>
-        </div></div>}
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div style={{ background: "#FFF9F5", minHeight: "100vh", padding: "10px 10px 90px" }}>
-      {/* âœ… CORRIGÃ‰ : Maintenant on affiche nomAffiche / whatsappAffiche / lettre */}
-      <div style={{ background: "white", borderRadius: 14, padding: "12px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 48, height: 48, background: "#FF6B35", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 20, fontWeight: 900 }}>
-          {lettre}
-        </div>
-        <div style={{ flex: 1 }}>
-          <p style={{ fontWeight: 900, fontSize: 15, margin: 0 }}>{nomAffiche}</p>
-          <p style={{ fontSize: 11, color: "#25D366", fontWeight: "bold", margin: "2px 0 0" }}>ðŸ“± {whatsappAffiche}</p>
-          <p style={{ fontSize: 11, color: "#888", margin: "1px 0 0" }}>ðŸ“ {profil.ville || "Bamako"} â€¢ {profil.email || user?.email || ""}</p>
-          <p style={{ fontSize: 11, color: "#888", margin: "1px 0 0" }}>â­ {profil.role || "vendeur"} {profil.nom && profil.boutique_nom && profil.nom !== profil.boutique_nom ? `â€¢ ðŸ‘¤ ${profil.nom}` : ""}</p>
-          <span style={{ background: "#E6FFED", color: "green", fontSize: 9, padding: "2px 7px", borderRadius: 999, fontWeight: "bold" }}>âœ“ COMPTE VÃ‰RIFIÃ‰</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-          <span style={{ background: "#FFF1E8", padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: "bold" }}>{solde} F</span>
-          <button onClick={seDeconnecter} style={{ background: "#FFE8E8", color: "red", border: "none", padding: "5px 10px", borderRadius: 999, fontSize: 10, fontWeight: "bold" }}>DÃ©connexion</button>
-        </div>
+      <div style={{ background: "white", borderTop: "1px solid #eee", display: "flex", justifyContent: "space-around", padding: "8px 0 10px", position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 430, margin: "0 auto", zIndex: 30 }}>
+        <button onClick={() => router.push("/")} style={{ background: "none", border: "none", fontSize: 11, fontWeight: "bold", color: "#888" }}>🏠<br />Accueil</button>
+        <button onClick={() => router.push("/messagerie")} style={{ background: "none", border: "none", fontSize: 11, fontWeight: "bold", color: "#888" }}>💬<br />Messagerie</button>
+        <button onClick={() => router.push("/")} style={{ background: "none", border: "none", fontSize: 11, fontWeight: "bold", color: "#888" }}>🛒<br />Panier</button>
+        <button onClick={() => router.push("/reels")} style={{ background: "none", border: "none", fontSize: 11, fontWeight: "bold", color: "#888" }}>🎬<br />Reels</button>
+        <button style={{ background: "none", border: "none", fontSize: 11, fontWeight: "bold", color: "#FF6B35" }}>👤<br />Compte</button>
       </div>
-      <button onClick={() => setVue("publications")} style={{ width: "100%", background: "#FF6B35", color: "white", border: "none", borderRadius: 12, padding: "11px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}><span style={{ fontWeight: 900, fontSize: 13 }}>ðŸª CrÃ©er ma Boutique PRO</span><span>â†’</span></button>
-      <div style={{ background: "white", borderRadius: 12, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-        <div><p style={{ fontWeight: "bold", fontSize: 12, margin: 0 }}>ðŸ“¸ Publier un produit</p><p style={{ fontSize: 11, color: "#888", margin: "1px 0 0" }}>Photo + VidÃ©o + WhatsApp â€¢ Anonyme</p></div>
-        <button onClick={() => setVue("publications")} style={{ background: "black", color: "white", border: "none", padding: "8px 15px", borderRadius: 999, fontSize: 12, fontWeight: "bold", flexShrink: 0 }}>+ Publier</button>
-      </div>
-      <p style={{ fontSize: 10, fontWeight: 900, color: "#999", margin: "12px 0 6px" }}>MON ACTIVITÃ‰</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        <button onClick={() => setVue("commandes")} style={{ background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "10px 8px", textAlign: "left" }}><span style={{ fontSize: 18 }}>ðŸ“¦</span><p style={{ fontSize: 11, fontWeight: "bold", margin: "4px 0 0" }}>Mes Commandes</p></button>
-        <button onClick={() => setVue("favoris")} style={{ background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "10px 8px", textAlign: "left" }}><span style={{ fontSize: 18 }}>â¤ï¸</span><p style={{ fontSize: 11, fontWeight: "bold", margin: "4px 0 0" }}>Mes Favoris</p></button>
-        <button onClick={() => setVue("stories")} style={{ background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "10px 8px", textAlign: "left" }}><span style={{ fontSize: 18 }}>ðŸ“¸</span><p style={{ fontSize: 11, fontWeight: "bold", margin: "4px 0 0" }}>Mes Stories</p></button>
-      </div>
-      <p style={{ fontSize: 10, fontWeight: 900, color: "#999", margin: "12px 0 6px" }}>MON PORTEFEUILLE ET MON PROFIL</p>
-      <button onClick={() => setVue("portefeuille-profil")} style={{ width: "100%", background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "11px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ fontWeight: "bold", fontSize: 12 }}>ðŸ’¼ Mon Portefeuille et Mon Profil</span><span>â€º</span></button>
-      <p style={{ fontSize: 10, fontWeight: 900, color: "#999", margin: "12px 0 6px" }}>RÃ‰FÃ‰RENCE</p>
-      <button onClick={() => setVue("reference")} style={{ width: "100%", background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "11px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ fontWeight: "bold", fontSize: 12 }}>ðŸ“– RÃ©fÃ©rence - Guide en Bambara</span><span>â€º</span></button>
-      <p style={{ fontSize: 10, fontWeight: 900, color: "#999", margin: "12px 0 6px" }}>ASSISTANCE ET LÃ‰GAL</p>
-      <button onClick={() => setVue("assistance")} style={{ width: "100%", background: "white", border: "1px solid #f0f0f0", borderRadius: 12, padding: "11px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ fontWeight: "bold", fontSize: 12 }}>ðŸ›Ÿ Assistance et LÃ©gal</span><span>â€º</span></button>
+    </div>
     </div>
   );
 }

@@ -1,9 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL="https://zhxvodaemgmwmohrafpf.supabase.co";
 const cle = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Vrai quand .env.local est rempli. Sinon l'application continue de fonctionner en mode local.
 export const supabaseConfigure = Boolean(url && cle);
 
-export const supabase = createClient(url ?? "http://localhost:54321", cle ?? "cle-non-configuree");
+const client = supabaseConfigure
+  ? createClient(url!, cle!)
+  : null;
+
+export const supabase = (
+  client ??
+  new Proxy({} as SupabaseClient, {
+    get() {
+      throw new Error(
+        "Supabase n'est pas configuré. Vérifie les variables de .env.local."
+      );
+    }
+  })
+) as SupabaseClient;
