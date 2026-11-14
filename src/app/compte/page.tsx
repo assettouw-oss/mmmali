@@ -178,7 +178,6 @@ export default function Compte() {
         categorie: categorieProduit,
         description: descProduit.trim() || titreProduit.trim(),
         whatsapp: whatsapp.trim(),
-        vendeur_nom: nom || user?.nom || "Vendeur MM Mali",
         ville: "Bamako",
         image_url: image_url,
         video_url: video_url,
@@ -395,6 +394,16 @@ export default function Compte() {
               <select value={categorieProduit} onChange={(e) => setCategorieProduit(e.target.value)} style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }}>
                 <option>Électronique</option><option>Mode</option><option>Restaurant</option><option>Sport</option><option>Maison</option><option>Beauté</option><option>Autre</option>
               </select>
+              <label>Numéro WhatsApp</label>
+<input
+  value={user?.whatsapp || ""}
+  readOnly
+  style={{ background: "#eee", color: "#333" }}
+  placeholder="Numéro WhatsApp"
+/>
+<p style={{ fontSize: "12px", color: "#666" }}>
+  C'est ton numéro de compte. Il ne peut pas être changé.
+</p>
               <textarea value={descProduit} onChange={(e) => setDescProduit(e.target.value)} placeholder="Description..." style={{ width: "100%", border: "1px solid #eee", borderRadius: 10, padding: "11px 12px", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box", minHeight: 60 }} />
               <p style={{ fontWeight: 900, fontSize: 13, margin: "10px 0 6px" }}>📸 Photo du produit</p>
               <label style={{ display: "block", border: "2px dashed #ddd", borderRadius: 12, padding: 14, textAlign: "center", cursor: "pointer", background: "#FAFAFA" }}>
